@@ -1,0 +1,25 @@
+.env
+.venv
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+*.pyw
+*.pyz
+*.pywz
+*.pyzz
+*.pywzz
+*.pyzzz
+*.pywzzz
+.DS_Store
+
+# 会話の記憶（ローカルで保持）
+#memory/
+*.md
+!README.md
+# 現在チャット中の要約（終了時にまとめられて memory/ に保存される）
+#memory/made_in_currentchat/
+# プライベート
+docs/
+private/
+.cursor/

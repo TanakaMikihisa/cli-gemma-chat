@@ -1,0 +1,5 @@
+transformers>=5.0
+torch
+accelerate
+prompt_toolkit>=3.0 
+outlines[transformers]; python_version < "3.14"
