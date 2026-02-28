@@ -21,10 +21,10 @@ MADE_IN_CURRENTCHAT_DIR = MEMORY_DIR / "made_in_currentchat"
 MEMORY_FILE = MEMORY_DIR / "memory.md"
 
 # チャット・記憶とも 4B のみ運用
-FINALIZE_MAX_NEW_TOKENS = 2000
-FINALIZE_MAX_LENGTH = 4096
-MERGE_MAX_NEW_TOKENS = 4096
-MERGE_MAX_LENGTH = 16384
+FINALIZE_MAX_NEW_TOKENS = 8000   # 2000 の 4 倍
+FINALIZE_MAX_LENGTH = 16384      # 4096 の 4 倍
+MERGE_MAX_NEW_TOKENS = 16384    # 4096 の 4 倍
+MERGE_MAX_LENGTH = 65536        # 16384 の 4 倍
 
 # memory.md の固定3セクション（見出しはこの表記に揃える）
 MEMORY_SECTIONS = (
@@ -130,6 +130,7 @@ def _generate_memory_section(
         "**指示:**\n"
         "・【今までの memory.md】全体と【今回まとめたセッション群】の両方を見て、**このセクションの内容だけ**を統合・追加調整して出力してください。\n"
         f"・他のセクション（{', '.join(other_sections)}）の内容も踏まえ、{purpose}\n"
+        "・**要約を心がけ、重点を意識する:** 細部や重複を省き、このセクションで重要な点だけを簡潔にまとめる。長く書かず、要点に絞る。\n"
         "・見出し（##）は書かず、**このセクションの本文だけ**を出力する。前置きや「以上」も不要。"
     )
     user = (
@@ -258,6 +259,7 @@ def _generate_session_section(
         f"**今回書くセクション:** 「{section_title}」\n\n"
         "【memory.md】の内容を参照し、その文脈を踏まえて、**今回のセッションで得られた情報だけ**をこのセクション用にまとめてください。\n"
         f"{purpose}\n"
+        "・**要約を心がけ、重点を意識する:** 重要な点だけを簡潔にまとめ、細部や重複は省く。\n"
         "見出し（##）は書かず、**このセクションの本文だけ**を出力する。前置き不要。"
     )
     user = (
