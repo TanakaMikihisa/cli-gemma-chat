@@ -21,10 +21,10 @@ MADE_IN_CURRENTCHAT_DIR = MEMORY_DIR / "made_in_currentchat"
 MEMORY_FILE = MEMORY_DIR / "memory.md"
 
 # チャット・記憶とも 4B のみ運用
-FINALIZE_MAX_NEW_TOKENS = 8000   # 2000 の 4 倍
-FINALIZE_MAX_LENGTH = 16384      # 4096 の 4 倍
-MERGE_MAX_NEW_TOKENS = 16384    # 4096 の 4 倍
-MERGE_MAX_LENGTH = 65536        # 16384 の 4 倍
+FINALIZE_MAX_NEW_TOKENS = 18000   # 8000 の 3 倍（セクション見切れ防止）
+FINALIZE_MAX_LENGTH = 98304       # 16384 の 3 倍
+MERGE_MAX_NEW_TOKENS = 72000     # 16384 の 3 倍
+MERGE_MAX_LENGTH = 393216        # 65536 の 3 倍
 
 # memory.md の固定3セクション（見出しはこの表記に揃える）
 MEMORY_SECTIONS = (
@@ -349,8 +349,8 @@ def _extract_json(text: str) -> dict | None:
         return None
 
 
-# memory.md を再調整する閾値（この本数以上、memory.md 以外の .md が溜まったセッション終わりに実行）
-MEMORY_MERGE_AFTER_SESSIONS = 5
+# memory.md を再調整する閾値（この本数以上、memory.md 以外の .md があればセッション終わりに実行）。1＝毎回書き換え。
+MEMORY_MERGE_AFTER_SESSIONS = 1
 
 
 def _consolidate_memory_if_needed(pipe) -> None:
@@ -387,7 +387,7 @@ def finalize_session(pipe=None) -> None:
     """
     made_in_currentchat/ 内の全 MD を読み、4B モデルで「チャット全体のまとめ」を生成する。
     memory.md を参照し、タイトル・概要と3セクションを**各1回ずつ**生成して session_*.md に保存する。
-    memory.md の再調整は、memory.md 以外の .md が MEMORY_MERGE_AFTER_SESSIONS 本以上溜まったセッション終わりにだけ行う。
+    セッション終了のたびに、既存の session_*.md と合わせて memory.md を再調整する（MEMORY_MERGE_AFTER_SESSIONS=1 で毎回実行）。
     """
     if not MADE_IN_CURRENTCHAT_DIR.is_dir():
         return
@@ -429,7 +429,7 @@ def finalize_session(pipe=None) -> None:
     md_content = _session_json_to_md(normalized)
     session_md_path.write_text(md_content, encoding="utf-8")
 
-    # memory.md の再調整は、memory.md 以外の .md が 5 本以上溜まったときだけ行う
+    # セッション終了のたびに memory.md を再調整（session_*.md を統合してから削除）
     _consolidate_memory_if_needed(pipe_for_memory)
 
     for p in parts:

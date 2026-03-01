@@ -32,7 +32,7 @@ make
 
 - **セッションまとめ**  
   終了時に`memory/made_in_currentchat/`の内容を1つのmdにまとめ、`memory/session_*.md`として保存します。
-  `memory.md`以外の`.md`が5本溜まったタイミングで、それらの内容と`memory.md`を統合します。
+  セッション終了のたびに、それらの内容と`memory.md`を統合して`memory.md`を書き換えます。
 
 ## ディレクトリ構成
 
