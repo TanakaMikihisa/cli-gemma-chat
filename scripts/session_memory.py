@@ -15,9 +15,9 @@ from pathlib import Path
 
 from transformers import GenerationConfig
 
-from pipe_loader import run_chat
+from scripts.pipe_loader import run_chat
 
-BASE_DIR = Path(__file__).resolve().parent
+BASE_DIR = Path(__file__).resolve().parent.parent
 MEMORY_DIR = BASE_DIR / "memory"
 MADE_IN_CURRENTCHAT_DIR = MEMORY_DIR / "made_in_currentchat"
 MEMORY_FILE = MEMORY_DIR / "memory.md"

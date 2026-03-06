@@ -1,9 +1,11 @@
 {
   "assistant_name": "Assistant",
-  "user_name": "You",
+  "user_name": "Tanaka Mikihisa",
   "model_priority": {
     "mlx": [
-      "models/gemma-3-glitter-12b-8bit"
+      "mlx-community/Qwen3.5-9B-5bit",  
+      "models/gemma-3-glitter-12b-8bit",
+      "mlx-community/Qwen2.5-7B-Instruct-4bit"
     ],
     "transformers": [
       "Qwen/Qwen2.5-7B-Instruct"

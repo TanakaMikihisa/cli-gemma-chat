@@ -13,7 +13,7 @@ warnings.filterwarnings("ignore", category=DeprecationWarning)
 from transformers import pipeline
 import torch
 
-BASE_DIR = Path(__file__).resolve().parent
+BASE_DIR = Path(__file__).resolve().parent.parent
 CONFIG_FILE = BASE_DIR / "config.json"
 
 # チャット用モデル: 下の MLX が使えればそれ、なければ Hugging Face から上のモデルをダウンロードして利用
@@ -22,7 +22,7 @@ CHAT_MODEL_ID = "Qwen/Qwen2.5-7B-Instruct"
 # 下: Mac (Apple Silicon) 用 MLX 8bit。優先して使用。
 CHAT_MODEL_ID_MLX = "mlx-community/Gemma-3-Glitter-12B-8bit"
 # ローカルに置いたモデル（例: huggingface-cli download ... --local-dir で取得）があればこちらを優先
-_LOCAL_MLX_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "models", "gemma-3-glitter-12b-8bit")
+_LOCAL_MLX_DIR = os.path.join(str(BASE_DIR), "models", "gemma-3-glitter-12b-8bit")
 
 
 def _load_config() -> dict:

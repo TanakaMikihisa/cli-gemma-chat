@@ -24,3 +24,8 @@ docs/
 private/
 .cursor/
 models/
+
+# UI (Node.js)
+ui/node_modules/
+ui/dist/
+ui/.tsbuildinfo
