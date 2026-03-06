@@ -504,13 +504,58 @@ def main():
     cfg = load_config()
     assistant_name = str(cfg.get("assistant_name") or "Gemma")
     user_name = str(cfg.get("user_name") or "You")
-    # 起動中はキラキラアニメーション、モデルロードの print は抑制
+    # モデルの存在状況を表示
+    from pipe_loader import check_model_availability
+    model_statuses = check_model_availability()
+    if model_statuses:
+        _status_icons = {"local": f"{s.ok}●{s.reset}", "cached": f"{s.ok}●{s.reset}", "not_found": f"{s.dim}○{s.reset}"}
+        _status_labels = {"local": "local", "cached": "cached", "not_found": "not downloaded"}
+        print()
+        print(f"{s.dim}Models:{s.reset}")
+        for ms in model_statuses:
+            icon = _status_icons.get(ms["status"], "?")
+            label = _status_labels.get(ms["status"], ms["status"])
+            kind = f"{s.dim}({ms['kind']}){s.reset}"
+            marker = f" {s.yellow}◀ loading{s.reset}" if ms.get("selected") else ""
+            print(f"  {icon} {ms['name']} {kind} {s.dim}[{label}]{s.reset}{marker}")
+        print()
+
+    # プログレスバー付きモデルロード
+    _progress_lock = threading.Lock()
+    _progress_state = {"loaded": 0, "total": 0}
+
+    def _on_load_progress(loaded: int, total: int):
+        with _progress_lock:
+            _progress_state["loaded"] = loaded
+            _progress_state["total"] = total
+
+    from pipe_loader import set_load_progress_callback
+    set_load_progress_callback(_on_load_progress)
+
+    def _loading_display(stop_flag: threading.Event):
+        out = sys.__stdout__
+        sparkle_i = 0
+        cols = shutil.get_terminal_size(fallback=(100, 20)).columns
+        bar_width = min(30, cols - 30)
+        while not stop_flag.is_set():
+            with _progress_lock:
+                loaded = _progress_state["loaded"]
+                total = _progress_state["total"]
+            frame = _SPARKLE_FRAMES[sparkle_i % len(_SPARKLE_FRAMES)]
+            sparkle_i += 1
+            if total > 0:
+                pct = min(loaded / total, 1.0)
+                filled = int(bar_width * pct)
+                bar = f"{s.ok}{'━' * filled}{s.reset}{s.dim}{'─' * (bar_width - filled)}{s.reset}"
+                text = f"\r{s.yellow}Loading...{s.reset} {bar} {s.bold}{int(pct * 100)}%{s.reset}{frame}  "
+            else:
+                text = f"\r{s.yellow}Starting...{s.reset}{frame}  "
+            out.write(text)
+            out.flush()
+            stop_flag.wait(0.1)
+
     stop_startup = threading.Event()
-    anim_startup = threading.Thread(
-        target=_sparkle_animation,
-        args=(stop_startup, "", "Starting...", s.yellow),
-        daemon=True,
-    )
+    anim_startup = threading.Thread(target=_loading_display, args=(stop_startup,), daemon=True)
     anim_startup.start()
     try:
         with _suppress_stderr(), contextlib.redirect_stdout(io.StringIO()):
@@ -519,13 +564,14 @@ def main():
     except Exception as e:
         stop_startup.set()
         anim_startup.join(timeout=0.5)
-        print(f"\r{' ' * 40}\r", end="", flush=True)
+        print(f"\r{' ' * 60}\r", end="", flush=True)
         print(f"{s.dim}Error: モデルを読み込めませんでした: {e}{s.reset}")
         sys.exit(1)
     finally:
         stop_startup.set()
         anim_startup.join(timeout=0.5)
-        print(f"\r{' ' * 40}\r", end="", flush=True)
+        set_load_progress_callback(None)
+        print(f"\r{' ' * 60}\r", end="", flush=True)
 
     # モデル名を取得（バナーに表示）
     _cfg_pipe = getattr(pipe, "model", None) and getattr(pipe.model, "config", None)

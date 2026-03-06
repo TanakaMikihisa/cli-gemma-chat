@@ -77,6 +77,73 @@ def _display_name_from_id_or_path(x: str) -> str:
     return x.split("/")[-1] if "/" in x else x
 
 
+def check_model_availability() -> list[dict]:
+    """
+    config.json の model_priority に列挙されたモデルの存在状況を返す。
+    戻り値: [{"name": 表示名, "kind": "mlx"|"transformers",
+              "status": "local"|"cached"|"not_found", "selected": bool}, ...]
+    selected=True は実際にロードされる見込みのモデル（優先順で最初に利用可能なもの）。
+    """
+    results: list[dict] = []
+    selected_set = False
+
+    def _hf_cached(repo_id: str) -> bool:
+        try:
+            from huggingface_hub import scan_cache_dir
+            cache_info = scan_cache_dir()
+            for repo in cache_info.repos:
+                if repo.repo_id == repo_id:
+                    return True
+        except Exception:
+            pass
+        return False
+
+    def _is_loadable(status: str) -> bool:
+        return status in ("local", "cached")
+
+    has_mlx = False
+    if sys.platform == "darwin":
+        try:
+            import mlx_lm  # noqa: F401
+            has_mlx = True
+        except ImportError:
+            pass
+
+    if has_mlx:
+        for cand in _get_model_priority("mlx"):
+            display = _display_name_from_id_or_path(cand)
+            local = _resolve_local_candidate(cand)
+            if local is not None:
+                status = "local"
+            elif _hf_cached(cand):
+                status = "cached"
+            else:
+                is_path = cand.startswith("/") or cand.startswith(".") or cand.startswith("models/")
+                if is_path:
+                    continue
+                status = "not_found"
+            chosen = not selected_set and _is_loadable(status)
+            if chosen:
+                selected_set = True
+            results.append({"name": display, "kind": "mlx", "status": status, "selected": chosen})
+
+    for cand in _get_model_priority("transformers"):
+        display = _display_name_from_id_or_path(cand)
+        local = _resolve_local_candidate(cand)
+        if local is not None:
+            status = "local"
+        elif _hf_cached(cand):
+            status = "cached"
+        else:
+            status = "not_found"
+        chosen = not selected_set and _is_loadable(status)
+        if chosen:
+            selected_set = True
+        results.append({"name": display, "kind": "transformers", "status": status, "selected": chosen})
+
+    return results
+
+
 def _get_device_and_dtype():
     if torch.cuda.is_available():
         return "cuda", torch.bfloat16
@@ -87,6 +154,13 @@ def _get_device_and_dtype():
 
 _pipe = None
 _using_mlx = False
+
+_load_progress_callback = None
+
+
+def set_load_progress_callback(cb):
+    global _load_progress_callback
+    _load_progress_callback = cb
 
 
 class _MLXPipelineWrapper:
@@ -131,7 +205,7 @@ def _try_load_mlx():
         if local is None:
             _ensure_huggingface_auth(cand)
         try:
-            model, tokenizer = mlx_load(model_path)
+            model, tokenizer = _mlx_load_with_progress(mlx_load, model_path)
             return _MLXPipelineWrapper(model, tokenizer, _display_name_from_id_or_path(model_path))
         except Exception as e:
             last_err = e
@@ -139,6 +213,59 @@ def _try_load_mlx():
     if last_err is not None:
         print(f"MLX load failed: {last_err}", file=sys.stderr)
     return None
+
+
+def _resolve_model_dir(model_path: str) -> Path | None:
+    """repo ID またはローカルパスから、safetensors が実在するディレクトリを返す。"""
+    p = Path(model_path)
+    if p.is_dir():
+        return p
+    if not p.is_absolute():
+        resolved = (BASE_DIR / p).resolve()
+        if resolved.is_dir():
+            return resolved
+    try:
+        from huggingface_hub import snapshot_download
+        return Path(snapshot_download(model_path, local_files_only=True))
+    except Exception:
+        return None
+
+
+def _mlx_load_with_progress(mlx_load, model_path: str):
+    """mx.load をモンキーパッチし、safetensors ファイル単位の進捗を通知しながらロードする。"""
+    cb = _load_progress_callback
+    if cb is None:
+        return mlx_load(model_path)
+
+    import glob as _glob
+    import mlx.core as mx
+
+    model_dir = _resolve_model_dir(model_path)
+    weight_files = sorted(_glob.glob(str(model_dir / "model*.safetensors"))) if model_dir else []
+    if not weight_files:
+        return mlx_load(model_path)
+
+    total_bytes = sum(os.path.getsize(f) for f in weight_files)
+    loaded_bytes = 0
+
+    original_mx_load = mx.load
+
+    def _patched_mx_load(path, *args, **kwargs):
+        nonlocal loaded_bytes
+        result = original_mx_load(path, *args, **kwargs)
+        try:
+            loaded_bytes += os.path.getsize(str(path))
+        except OSError:
+            pass
+        cb(loaded_bytes, total_bytes)
+        return result
+
+    mx.load = _patched_mx_load
+    try:
+        result = mlx_load(model_path)
+    finally:
+        mx.load = original_mx_load
+    return result
 
 
 def _ensure_huggingface_auth(model_id: str | None = None):
