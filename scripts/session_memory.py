@@ -2,7 +2,7 @@
 チャット中の要約を made_in_currentchat/ に保存し、終了時に memory/ に保存する。
 
 ・session_*.md … セッションごとの「その回のまとめ」。タイトル・概要・3セクションは各1回ずつ生成。
-・memory.md … 「話したこと(超要約)」「関係性」「ユーザーの人物像」の3セクションで構成。
+・memory.md … 「関心事項」「関係性」「ユーザーの人物像」の3セクションで構成。
   既存の memory.md と今回のセッションのまとめを統合・追加調整して更新する。
 """
 import contextlib
@@ -30,14 +30,14 @@ MERGE_MAX_LENGTH = 393216        # 65536 の 3 倍
 
 # memory.md の固定3セクション（見出しはこの表記に揃える）
 MEMORY_SECTIONS = (
-    "話したこと(超要約)",
+    "関心事項",
     "関係性",
     "ユーザーの人物像",
 )
 
 # 各セクションの「形成に重要であるもの」の説明（生成時の優先指示用）
 MEMORY_SECTION_PURPOSE = {
-    "話したこと(超要約)": "テーマ・出来事・決まったこと・時系列がわかる情報。重複は1つにまとめ、このセクションの形成に重要であるものを優先的に採用する。",
+    "関心事項": "ユーザーが今関心を持っているテーマ・取り組み・プロジェクト・学習中のこと。古い話題は新しいもので上書きし、現在の関心だけを残す。",
     "関係性": "ユーザーとアシスタントの関係性・役割・トーン・距離感。関係性の形成に重要であるものを優先的に採用する。",
     "ユーザーの人物像": "興味・仕事・性格・よく出る話題・言動の傾向。ユーザー像の形成に重要であるものを優先的に採用する。",
 }
@@ -87,7 +87,7 @@ def _suppress_stderr():
 def _ensure_memory_sections(md: str) -> str:
     """
     モデル出力を検査し、3セクションを抽出。欠けていれば見出しを補い、順序を統一する。
-    見出しが一つもない場合は全文を「話したこと(超要約)」に格納する。
+    見出しが一つもない場合は全文を「関心事項」に格納する。
     """
     sections_found = {t: "" for t in MEMORY_SECTIONS}
     stripped = md.strip()
@@ -101,7 +101,7 @@ def _ensure_memory_sections(md: str) -> str:
             if title_candidate.strip() == canonical:
                 sections_found[canonical] = body.strip()
                 break
-    # どのセクションにも入らなかった場合は「話したこと」に全文を
+    # どのセクションにも入らなかった場合は「関心事項」に全文を
     if stripped and not any(sections_found.values()):
         sections_found[MEMORY_SECTIONS[0]] = stripped
     parts = []
@@ -290,7 +290,7 @@ def _generate_structured_with_outlines(pipe, combined: str, schema: dict, json_s
         device = "cpu"
     system_text = (
         "以下は今回のチャットで保存した記憶ノート（複数）です。"
-        "これらを「このセッションのまとめ」として、タイトル・概要・話したこと(超要約)・関係性・ユーザーの人物像の形でまとめ、指定のJSON形式だけで出力してください。"
+        "これらを「このセッションのまとめ」として、タイトル・概要・関心事項・関係性・ユーザーの人物像の形でまとめ、指定のJSON形式だけで出力してください。"
     )
     msgs = [
         {"role": "system", "content": system_text},
