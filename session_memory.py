@@ -15,6 +15,8 @@ from pathlib import Path
 
 from transformers import GenerationConfig
 
+from pipe_loader import run_chat
+
 BASE_DIR = Path(__file__).resolve().parent
 MEMORY_DIR = BASE_DIR / "memory"
 MADE_IN_CURRENTCHAT_DIR = MEMORY_DIR / "made_in_currentchat"
@@ -141,14 +143,9 @@ def _generate_memory_section(
         {"role": "system", "content": _to_content(system)},
         {"role": "user", "content": _to_content(user)},
     ]
-    gen_cfg = GenerationConfig(max_new_tokens=max_new_tokens, max_length=max_length)
+    gen_cfg = GenerationConfig(max_new_tokens=max_new_tokens, max_length=max_length, do_sample=False)
     with _suppress_stderr():
-        out = pipe(text=msgs, generation_config=gen_cfg, return_full_text=False)
-    gen = out[0].get("generated_text")
-    if isinstance(gen, list):
-        body = gen[-1].get("content", "").strip() if gen else ""
-    else:
-        body = (str(gen).strip() if gen else "")
+        body = run_chat(pipe, msgs, gen_cfg).strip()
     # 見出し行が含まれていたら除去
     for st in MEMORY_SECTIONS:
         if body.startswith(f"## {st}"):
@@ -226,14 +223,9 @@ def _generate_session_title_summary(
         {"role": "system", "content": _to_content(system)},
         {"role": "user", "content": _to_content(user)},
     ]
-    gen_cfg = GenerationConfig(max_new_tokens=max_new_tokens, max_length=max_length)
+    gen_cfg = GenerationConfig(max_new_tokens=max_new_tokens, max_length=max_length, do_sample=False)
     with _suppress_stderr():
-        out = pipe(text=msgs, generation_config=gen_cfg, return_full_text=False)
-    gen = out[0].get("generated_text")
-    if isinstance(gen, list):
-        raw = gen[-1].get("content", "").strip() if gen else ""
-    else:
-        raw = (str(gen).strip() if gen else "")
+        raw = run_chat(pipe, msgs, gen_cfg).strip()
     data = _extract_json(raw)
     if data and isinstance(data, dict):
         return {
@@ -270,14 +262,9 @@ def _generate_session_section(
         {"role": "system", "content": _to_content(system)},
         {"role": "user", "content": _to_content(user)},
     ]
-    gen_cfg = GenerationConfig(max_new_tokens=max_new_tokens, max_length=max_length)
+    gen_cfg = GenerationConfig(max_new_tokens=max_new_tokens, max_length=max_length, do_sample=False)
     with _suppress_stderr():
-        out = pipe(text=msgs, generation_config=gen_cfg, return_full_text=False)
-    gen = out[0].get("generated_text")
-    if isinstance(gen, list):
-        body = gen[-1].get("content", "").strip() if gen else ""
-    else:
-        body = (str(gen).strip() if gen else "")
+        body = run_chat(pipe, msgs, gen_cfg).strip()
     for st in MEMORY_SECTIONS:
         if body.startswith(f"## {st}"):
             body = body[len(f"## {st}"):].lstrip("\n")
@@ -294,7 +281,7 @@ def _generate_structured_with_outlines(pipe, combined: str, schema: dict, json_s
     model_name = getattr(
         getattr(pipe.model, "config", None),
         "name_or_path",
-        getattr(getattr(pipe.model, "config", None), "_name_or_path", "google/gemma-3-4b-it"),
+        getattr(getattr(pipe.model, "config", None), "_name_or_path", "Qwen/Qwen2.5-7B-Instruct"),
     )
     device = getattr(pipe, "device", None)
     if device is not None and not isinstance(device, str):

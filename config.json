@@ -1,0 +1,12 @@
+{
+  "assistant_name": "Assistant",
+  "user_name": "You",
+  "model_priority": {
+    "mlx": [
+      "models/gemma-3-glitter-12b-8bit"
+    ],
+    "transformers": [
+      "Qwen/Qwen2.5-7B-Instruct"
+    ]
+  }
+}

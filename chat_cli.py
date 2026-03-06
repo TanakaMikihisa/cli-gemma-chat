@@ -7,34 +7,47 @@ Gemma を使った CLI チャット。
 - いま … 起動時の現在地・天気・日時を取得し、補足（+alpha）としてコンテキストに含める
 """
 import contextlib
+import io
 import json
 import os
+import shutil
 import sys
 import threading
 import time
+import textwrap
 import urllib.request
 from datetime import datetime
 from pathlib import Path
 
-# 入力欄をエディタのようにする（Ctrl+A/Ctrl+E 等が効き、変な記号が入らない）
-def _input_line(prompt: str) -> str:
+def _input_with_border() -> str:
+    """Gemini CLI 風のボーダー付き入力欄。Enter で送信。"""
+    cols = shutil.get_terminal_size(fallback=(100, 20)).columns
+    dim = "\033[2m"
+    reset = "\033[0m"
+
+    # 上辺ボーダー
+    print(f"{dim}{'▀' * cols}{reset}")
+
     try:
         from prompt_toolkit import prompt as pt_prompt
         from prompt_toolkit.formatted_text import ANSI
-        # ANSI でプロンプトの色を解釈（そのまま渡すと ^[[36m のように出るため）
-        return pt_prompt(ANSI(prompt)).strip()
+        result = pt_prompt(ANSI(f" {dim}>{reset}  "), erase_when_done=True).strip()
     except Exception:
-        pass
-    try:
-        import readline  # noqa: F401 - Unix で input() を readline に
-    except ImportError:
-        pass
-    return input(prompt).strip()
+        try:
+            import readline  # noqa: F401
+        except ImportError:
+            pass
+        result = input(f" >  ").strip()
 
-# 起動直後に警告を抑制（CLI を読みやすくする）
+    # 入力行を消して下辺ボーダーを描画
+    if sys.stdout.isatty():
+        print(f"\033[1A\033[2K", end="", flush=True)
+    print(f"{dim}{'▄' * cols}{reset}")
+
+    return result
+
 # pipe_loader が import する前に TRANSFORMERS_VERBOSITY を置くと、
 # transformers の初回設定で error が使われる
-import os
 os.environ.setdefault("TRANSFORMERS_VERBOSITY", "error")
 import logging
 import warnings
@@ -46,6 +59,7 @@ BASE_DIR = Path(__file__).resolve().parent
 PRE_LOADING_DIR = BASE_DIR / "pre_loading_data"
 MEMORY_DIR = BASE_DIR / "memory"
 MEMORY_FILE = MEMORY_DIR / "memory.md"
+CONFIG_FILE = BASE_DIR / "config.json"
 
 CONSOLIDATE_AFTER = 10  # 5往復（ユーザー+応答×5）たまったら要約して記憶に固着
 
@@ -62,6 +76,75 @@ def _style():
         "yellow": "\033[33m",
         "reset": "\033[0m",
     })()
+
+
+def _format_elapsed_seconds(seconds: float) -> str:
+    """CLI 表示用の経過時間（例: 10s / 0.8s）。"""
+    try:
+        s = float(seconds)
+    except Exception:
+        return "?"
+    if s < 0:
+        s = 0.0
+    if s < 10:
+        return f"{s:.1f}s"
+    return f"{int(round(s))}s"
+
+
+def _get_cols() -> int:
+    return shutil.get_terminal_size(fallback=(100, 20)).columns
+
+
+def _print_separator(s=None):
+    """端末幅いっぱいの dim な横線。"""
+    cols = _get_cols()
+    dim = s.dim if s else "\033[2m"
+    reset = s.reset if s else "\033[0m"
+    print(f"{dim}{'─' * cols}{reset}")
+
+
+def _wrap_text(text: str, width: int) -> list[str]:
+    """日本語にも対応した折り返し。"""
+    wrapper = textwrap.TextWrapper(
+        width=width,
+        expand_tabs=False,
+        replace_whitespace=False,
+        drop_whitespace=False,
+        break_long_words=True,
+        break_on_hyphens=False,
+    )
+    out = []
+    for raw_line in (text or "").split("\n"):
+        if raw_line == "":
+            out.append("")
+        else:
+            out.extend(wrapper.wrap(raw_line) or [raw_line])
+    return out
+
+
+def _print_message(label: str, text: str, *, s, footer: str = "") -> None:
+    """
+    セパレーター → bold ラベル → 本文（折り返し） → 右寄せフッター。
+    """
+    cols = _get_cols()
+    _print_separator(s)
+    print(f"{s.bold}{label}{s.reset}")
+    for line in _wrap_text(text, cols):
+        print(line)
+    if footer:
+        print(f"{s.dim}{footer}{s.reset}")
+
+
+def load_config() -> dict:
+    """config.json を読み込む。存在しない/壊れている場合は空 dict。"""
+    if not CONFIG_FILE.is_file():
+        return {}
+    try:
+        raw = CONFIG_FILE.read_text(encoding="utf-8")
+        cfg = json.loads(raw)
+        return cfg if isinstance(cfg, dict) else {}
+    except Exception:
+        return {}
 
 
 def load_pre_loading_data() -> str:
@@ -189,10 +272,10 @@ def _print_current_context(current_md: str) -> None:
         rest = line[2:].strip()
         if rest.startswith("**Date/time**:"):
             value = rest.split(":", 1)[1].strip()
-            out.append(f"  {s.dim}📅 {value}{s.reset}")
+            out.append(f"  📅 {value}")
         elif rest.startswith("**Location**:"):
             value = rest.split(":", 1)[1].strip()
-            out.append(f"  {s.dim}📍 {value}{s.reset}")
+            out.append(f"  📍 {value}")
         elif rest.startswith("**Weather**:"):
             value = rest.split(":", 1)[1].strip()
             weather_desc = ""
@@ -201,7 +284,7 @@ def _print_current_context(current_md: str) -> None:
                 # 表示は括弧なし（絵文字でわかるため）
                 value = value[: value.index("(")].strip()
             emoji = _weather_desc_to_emoji(weather_desc)
-            out.append(f"  {s.dim}{emoji} {value}{s.reset}")
+            out.append(f"  {emoji} {value}")
     if out:
         print("\n".join(out))
         print()
@@ -243,7 +326,10 @@ def _build_messages(context_md: str | None, messages: list[dict]) -> list[dict]:
 
 @contextlib.contextmanager
 def _suppress_stderr():
-    """pipe() 実行中の transformers の警告ログを標準エラーに出さないようにする。"""
+    """標準エラーを抑制（モデル読み込み時の Progress 表示などを隠す）。"""
+    if not sys.stderr.isatty():
+        yield
+        return
     stderr_fd = sys.stderr.fileno()
     with open(os.devnull, "w") as devnull:
         save_fd = os.dup(stderr_fd)
@@ -262,16 +348,11 @@ def chat(pipe, context_md: str | None, messages: list[dict]) -> str:
     if not messages:
         return ""
     built = _build_messages(context_md, messages)
-    # 応答の長さ: 長めに取って途中切れを防ぐ
     from transformers import GenerationConfig
-    gen_cfg = GenerationConfig(max_new_tokens=2048, max_length=4096)
+    from pipe_loader import run_chat
+    gen_cfg = GenerationConfig(max_new_tokens=2048, max_length=4096, do_sample=False)
     with _suppress_stderr():
-        out = pipe(text=built, generation_config=gen_cfg, return_full_text=False)
-    gen = out[0].get("generated_text")
-    if isinstance(gen, list):
-        reply = gen[-1].get("content", "") if gen else ""
-    else:
-        reply = str(gen) if gen else ""
+        reply = run_chat(pipe, built, gen_cfg)
     return reply.strip()
 
 
@@ -300,13 +381,9 @@ def summarize_memory(pipe, memory_md: str, messages: list[dict]) -> str:
         {"role": "user", "content": _to_content(prompt)},
     ]
     from transformers import GenerationConfig
+    from pipe_loader import run_chat
     with _suppress_stderr():
-        out = pipe(text=msgs, generation_config=GenerationConfig(max_new_tokens=768, max_length=2048), return_full_text=False)
-    gen = out[0].get("generated_text")
-    if isinstance(gen, list):
-        new_md = gen[-1].get("content", "") if gen else ""
-    else:
-        new_md = str(gen) if gen else ""
+        new_md = run_chat(pipe, msgs, GenerationConfig(max_new_tokens=768, max_length=2048, do_sample=False))
     return new_md.strip()
 
 
@@ -323,32 +400,42 @@ _SPARKLE_FRAMES = [
 ]
 
 
-@contextlib.contextmanager
-def _suppress_stderr():
-    """標準エラーを抑制（モデル読み込み時の Progress 表示などを隠す）。"""
-    if not sys.stderr.isatty():
-        yield
-        return
-    stderr_fd = sys.stderr.fileno()
-    with open(os.devnull, "w") as devnull:
-        save_fd = os.dup(stderr_fd)
-        try:
-            sys.stderr.flush()
-            os.dup2(devnull.fileno(), stderr_fd)
-            yield
-        finally:
-            sys.stderr.flush()
-            os.dup2(save_fd, stderr_fd)
-            os.close(save_fd)
-
 
 def _sparkle_animation(stop_flag: threading.Event, prefix: str, message: str = "Thinking...", color: str = ""):
-    reset = "\033[0m" if color else ""
+    reset = "\033[0m"
+    out = sys.__stdout__
     i = 0
     while not stop_flag.is_set():
         frame = _SPARKLE_FRAMES[i % len(_SPARKLE_FRAMES)]
-        print(f"\r{prefix}{color}{message}{reset}{frame}", end="", flush=True)
+        out.write(f"\r{prefix}{color}{message}{frame}{reset}")
+        out.flush()
         i += 1
+        stop_flag.wait(0.12)
+
+
+def _thinking_elapsed_display(stop_flag: threading.Event, thinking_prefix: str, start_time: float):
+    """
+    セパレーター(1行) + thinking(1行) + 秒数(1行) = 3行を表示し、
+    秒数とキラキラを更新し続ける。呼び出し側で 3 行を消す。
+    """
+    dim = "\033[2m"
+    reset = "\033[0m"
+    cols = shutil.get_terminal_size(fallback=(100, 20)).columns
+    # 1行目: セパレーター
+    print(f"{dim}{'─' * cols}{reset}")
+    # 2行目: thinking + sparkle
+    print(f"{thinking_prefix}thinking... {_SPARKLE_FRAMES[0]}")
+    # 3行目: 秒数
+    print(f"{dim}1s{reset}", end="", flush=True)
+    i = 0
+    while not stop_flag.is_set():
+        i += 1
+        frame = _SPARKLE_FRAMES[i % len(_SPARKLE_FRAMES)]
+        n = max(1, int(time.perf_counter() - start_time))
+        # 2行上に戻って thinking 行を更新
+        print(f"\033[1A\r{thinking_prefix}thinking... {frame}  ", end="", flush=True)
+        # 3行目に戻って秒数を更新
+        print(f"\n\r{dim}{n}s{reset}  ", end="", flush=True)
         stop_flag.wait(0.12)
 
 
@@ -377,8 +464,8 @@ def _apply_gradient_line(line: str, use_color: bool) -> str:
     return "".join(out)
 
 
-def _print_banner():
-    """モデル読み込み完了後：banner.txt を読み、左→右グラデーションで表示。"""
+def _print_banner(model_name: str = ""):
+    """banner.txt を読み、左→右グラデーションで表示。"""
     s = _style()
     use_color = sys.stdout.isatty()
     print()
@@ -388,13 +475,15 @@ def _print_banner():
             lines = [ln.rstrip() for ln in raw.splitlines() if ln.strip()]
             for line in lines:
                 grad_line = _apply_gradient_line(line, use_color)
-                print(f"  {s.bold}{grad_line}{s.reset}")
+                print(f"{s.bold}{grad_line}{s.reset}")
         except OSError:
-            print(f"  {s.bold}{s.gemma}GEM CHAT{s.reset}")
+            print(f"{s.bold}{s.gemma}GEM CHAT{s.reset}")
     else:
-        print(f"  {s.bold}{s.gemma}GEM CHAT{s.reset}")
+        print(f"{s.bold}{s.gemma}GEM CHAT{s.reset}")
     print()
-    print(f"  {s.dim}▸ Talk to me. Type quit or exit to end.{s.reset}")
+    if model_name:
+        print(f"{s.dim}Model: {model_name}{s.reset}")
+    print(f"{s.dim}▸ Talk to me. Type quit or exit to end.{s.reset}")
     print()
 
 
@@ -412,65 +501,91 @@ def _build_full_context(pre_loaded: str, memory_md: str, current_md: str = "") -
 
 def main():
     s = _style()
-    # 起動中はキラキラアニメーションを表示し、モデル読み込みログは出さない
+    cfg = load_config()
+    assistant_name = str(cfg.get("assistant_name") or "Gemma")
+    user_name = str(cfg.get("user_name") or "You")
+    # 起動中はキラキラアニメーション、モデルロードの print は抑制
     stop_startup = threading.Event()
     anim_startup = threading.Thread(
         target=_sparkle_animation,
-        args=(stop_startup, "  ", "Starting...", s.yellow),
+        args=(stop_startup, "", "Starting...", s.yellow),
         daemon=True,
     )
     anim_startup.start()
     try:
-        with _suppress_stderr():
+        with _suppress_stderr(), contextlib.redirect_stdout(io.StringIO()):
             from pipe_loader import get_pipe
             pipe = get_pipe()
     finally:
         stop_startup.set()
         anim_startup.join(timeout=0.5)
-        print(f"\r  {' ' * 24}\r", end="", flush=True)
+        print(f"\r{' ' * 40}\r", end="", flush=True)
+
+    # モデル名を取得（バナーに表示）
+    _cfg_pipe = getattr(pipe, "model", None) and getattr(pipe.model, "config", None)
+    _model_id = getattr(_cfg_pipe, "_name_or_path", None) if _cfg_pipe else None
+    _model_display = (_model_id.split("/")[-1] if _model_id and "/" in _model_id else _model_id) or ""
 
     pre_loaded = load_pre_loading_data()
     memory_md = load_memory()
     current_md = fetch_current_context_md()
-    _print_banner()
+    _print_banner(model_name=_model_display)
     _print_current_context(current_md)
 
     recent_messages: list[dict] = []
-    gemma_label = f"  {s.gemma}Gemma{s.reset} "
-    you_prompt = f"  {s.you}You{s.reset} ▸ "
 
     try:
         while True:
             try:
-                line = _input_line(you_prompt)
+                line = _input_with_border()
             except (EOFError, KeyboardInterrupt):
-                print(f"\n  {s.dim}Bye!{s.reset}\n")
+                print(f"\n{s.dim}Bye!{s.reset}\n")
                 break
             if not line or line.lower() in ("quit", "exit", "q"):
-                print(f"  {s.dim}Bye!{s.reset}\n")
+                print(f"{s.dim}Bye!{s.reset}\n")
                 break
 
             recent_messages.append({"role": "user", "content": line})
-            anim_prefix = f"  {s.gemma}Gemma{s.reset} "
+            # 入力エリア（ボーダー2行）を消す
+            if sys.stdout.isatty():
+                print("\033[2A\033[J", end="", flush=True)
+            _print_message(f"{s.you}{user_name}{s.reset}", line, s=s)
+            anim_prefix = f"{s.gemma}{assistant_name}{s.reset} "
             stop_flag = threading.Event()
-            anim = threading.Thread(target=_sparkle_animation, args=(stop_flag, anim_prefix), daemon=True)
+            context = _build_full_context(pre_loaded, memory_md, current_md)
+            t0 = time.perf_counter()
+            anim = threading.Thread(
+                target=_thinking_elapsed_display,
+                args=(stop_flag, anim_prefix, t0),
+                daemon=True,
+            )
             anim.start()
             try:
-                context = _build_full_context(pre_loaded, memory_md, current_md)
                 reply = chat(pipe, context if context.strip() else None, recent_messages)
+                elapsed = time.perf_counter() - t0
                 stop_flag.set()
                 anim.join(timeout=0.5)
+                # thinking 3行（セパレーター + thinking + 秒数）を消す
+                if sys.stdout.isatty():
+                    print(f"\033[2K\033[1A\033[2K\033[1A\033[2K\r", end="", flush=True)
                 text = reply or "(応答が空でした)"
-                # 複数行はインデントを揃える
-                lines = text.split("\n")
-                print(f"\r{anim_prefix}{' ' * 24}\r{gemma_label}{lines[0]}")
-                for L in lines[1:]:
-                    print(f"  {s.dim}│{s.reset} {L}")
+                _print_message(
+                    f"{s.gemma}{assistant_name}{s.reset}",
+                    text,
+                    s=s,
+                    footer=_format_elapsed_seconds(elapsed),
+                )
                 recent_messages.append({"role": "assistant", "content": reply})
             except Exception as e:
                 stop_flag.set()
                 anim.join(timeout=0.5)
-                print(f"\r{anim_prefix}{' ' * 24}\r{gemma_label}{s.dim}Error: {e}{s.reset}")
+                if sys.stdout.isatty():
+                    print(f"\033[2K\033[1A\033[2K\033[1A\033[2K\r", end="", flush=True)
+                _print_message(
+                    f"{s.gemma}{assistant_name}{s.reset}",
+                    f"Error: {e}",
+                    s=s,
+                )
                 recent_messages.pop()
                 continue
 
@@ -489,11 +604,11 @@ def main():
                     session_memory.save_consolidation(memory_md)
                     stop_summary.set()
                     anim_summary.join(timeout=0.5)
-                    print(f"\r  {' ' * 24}\r  {s.dim}◇ Memory updated{s.reset}", flush=True)
+                    print(f"\r{' ' * 24}\r{s.dim}◇ Memory updated{s.reset}", flush=True)
                 except Exception as e:
                     stop_summary.set()
                     anim_summary.join(timeout=0.5)
-                    print(f"\r  {' ' * 24}\r  {s.dim}Summary error: {e}{s.reset}", flush=True)
+                    print(f"\r{' ' * 24}\r{s.dim}Summary error: {e}{s.reset}", flush=True)
             print()
     finally:
         # 5往復未満で終了した場合も、会話があれば要約を1回保存してから finalize する
@@ -519,7 +634,7 @@ def main():
         finally:
             stop_finalize.set()
             anim_finalize.join(timeout=0.5)
-            print(f"\r  {' ' * 24}\r", end="", flush=True)
+            print(f"\r{' ' * 24}\r", end="", flush=True)
         pipe = None
         from pipe_loader import release_chat_pipe
         release_chat_pipe()
