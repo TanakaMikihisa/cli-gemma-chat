@@ -41,14 +41,7 @@ HF キャッシュにあるモデルを MLX 用 4bit に量子化します。既
 
 ```bash
 make convert-mlx-4bit
-# または
-python scripts/convert_hf_to_mlx_4bit.py
 ```
-
-- `--hf-path` で別の HF モデルを指定可能（例: `google/gemma-3-4b-it`）
-- `--mlx-path` で保存先を変更可能
-- `--with-download` で未キャッシュの場合に先にダウンロード
-- `--overwrite` で既存の保存先を削除してから量子化
 
 ## config.json
 
