@@ -3,7 +3,7 @@
   "user_name": "You",
   "model_priority": {
     "mlx": [
-      "mlx-community/Qwen2.5-7B-Instruct-4bit"
+      "models/gemma-3-glitter-12b-8bit"
     ],
     "transformers": [
       "Qwen/Qwen2.5-7B-Instruct"
