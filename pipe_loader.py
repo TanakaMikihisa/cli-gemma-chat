@@ -122,20 +122,22 @@ def _try_load_mlx():
         from mlx_lm import load as mlx_load
     except ImportError:
         return None
+    last_err: Exception | None = None
     for cand in _get_model_priority("mlx"):
         local = _resolve_local_candidate(cand)
         model_path = local or cand
-        # ローカル指定だが存在しない場合は次へ
         if local is None and (cand.startswith("/") or cand.startswith(".") or cand.startswith("models/")):
             continue
-        # repo id を試すときだけ auth を促す
         if local is None:
             _ensure_huggingface_auth(cand)
         try:
             model, tokenizer = mlx_load(model_path)
             return _MLXPipelineWrapper(model, tokenizer, _display_name_from_id_or_path(model_path))
-        except Exception:
+        except Exception as e:
+            last_err = e
             continue
+    if last_err is not None:
+        print(f"MLX load failed: {last_err}", file=sys.stderr)
     return None
 
 
@@ -238,4 +240,5 @@ def get_pipe():
                 continue
         if last_err is not None:
             raise last_err
+        raise RuntimeError("No model could be loaded. Check config.json model_priority and network connectivity.")
     return _pipe

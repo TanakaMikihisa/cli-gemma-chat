@@ -516,6 +516,12 @@ def main():
         with _suppress_stderr(), contextlib.redirect_stdout(io.StringIO()):
             from pipe_loader import get_pipe
             pipe = get_pipe()
+    except Exception as e:
+        stop_startup.set()
+        anim_startup.join(timeout=0.5)
+        print(f"\r{' ' * 40}\r", end="", flush=True)
+        print(f"{s.dim}Error: モデルを読み込めませんでした: {e}{s.reset}")
+        sys.exit(1)
     finally:
         stop_startup.set()
         anim_startup.join(timeout=0.5)
