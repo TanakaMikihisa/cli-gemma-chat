@@ -360,13 +360,15 @@ def _finalize_and_exit(pipe, memory_md: str, recent_messages: list[dict]):
         try:
             _md = summarize_memory(pipe, memory_md, recent_messages)
             session_memory.save_consolidation(_md)
-        except Exception:
-            pass
+        except Exception as e:
+            emit("error", {"message": f"save_consolidation failed: {e}"})
 
     try:
         session_memory.finalize_session(pipe=pipe)
-    except Exception:
-        pass
+    except Exception as e:
+        emit("error", {"message": f"finalize_session failed: {e}"})
+
+    emit("finalize_done")
 
     from scripts.pipe_loader import release_chat_pipe
     release_chat_pipe()

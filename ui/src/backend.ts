@@ -74,9 +74,15 @@ export class Backend extends EventEmitter {
 
   quit(): void {
     this.send("quit");
-    setTimeout(() => {
+    const onFinalized = () => {
+      clearTimeout(fallback);
+      setTimeout(() => this.proc?.kill("SIGTERM"), 500);
+    };
+    this.once("finalize_done", onFinalized);
+    const fallback = setTimeout(() => {
+      this.removeListener("finalize_done", onFinalized);
       this.proc?.kill("SIGTERM");
-    }, 5000);
+    }, 300_000);
   }
 
   kill(): void {

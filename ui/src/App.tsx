@@ -154,10 +154,26 @@ export const App: React.FC = () => {
     []
   );
 
+  const [exitFrame, setExitFrame] = useState(0);
+
+  useEffect(() => {
+    if (phase !== "exiting") return;
+    const interval = setInterval(() => {
+      setExitFrame((i) => (i + 1) % theme.sparkleFrames.length);
+    }, 120);
+    return () => clearInterval(interval);
+  }, [phase]);
+
   if (phase === "exiting") {
     return (
-      <Box flexDirection="column" paddingBottom={1}>
-        <Text dimColor>Bye!</Text>
+      <Box paddingLeft={2} paddingBottom={1}>
+        <Text color={theme.colors.primary}>
+          {theme.sparkleFrames[exitFrame]}
+        </Text>
+        <Text color={theme.colors.warning}>Saving memory…</Text>
+        <Text color={theme.colors.primary}>
+          {theme.sparkleFrames[(exitFrame + 4) % theme.sparkleFrames.length]}
+        </Text>
       </Box>
     );
   }
