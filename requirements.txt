@@ -3,3 +3,6 @@ torch
 accelerate
 prompt_toolkit>=3.0 
 outlines[transformers]; python_version < "3.14"
+# Mac (Apple Silicon) 用: MLX で推論を高速化（pip install mlx mlx-lm）
+mlx; sys_platform == "darwin"
+mlx-lm; sys_platform == "darwin"
