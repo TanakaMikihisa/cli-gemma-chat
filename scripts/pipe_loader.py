@@ -53,6 +53,26 @@ def _get_model_priority(kind: str) -> list[str]:
     return [CHAT_MODEL_ID]
 
 
+def _get_adapter_path(model_id: str) -> str | None:
+    """
+    config.json の model_priority.adapters で、指定モデル用のアダプタパスがあれば返す。
+    """
+    cfg = _load_config()
+    mp = cfg.get("model_priority") if isinstance(cfg, dict) else None
+    if not isinstance(mp, dict):
+        return None
+    adapters = mp.get("adapters")
+    if not isinstance(adapters, dict):
+        return None
+    path = adapters.get(model_id)
+    if not isinstance(path, str) or not path.strip():
+        return None
+    p = Path(path.strip())
+    if not p.is_absolute():
+        p = (BASE_DIR / p).resolve()
+    return str(p) if p.exists() else None
+
+
 def _resolve_local_candidate(candidate: str) -> str | None:
     """
     candidate がローカルパスなら絶対パスを返す。存在しなければ None。
@@ -81,8 +101,10 @@ def check_model_availability() -> list[dict]:
     """
     config.json の model_priority に列挙されたモデルの存在状況を返す。
     戻り値: [{"name": 表示名, "kind": "mlx"|"transformers",
-              "status": "local"|"cached"|"not_found", "selected": bool}, ...]
+              "status": "local"|"cached"|"not_found", "selected": bool,
+              "adapter": bool, "adapter_name": str|None}, ...]
     selected=True は実際にロードされる見込みのモデル（優先順で最初に利用可能なもの）。
+    アダプタが config に設定されていれば adapter=True, adapter_name=ディレクトリ名。
     """
     results: list[dict] = []
     selected_set = False
@@ -126,7 +148,16 @@ def check_model_availability() -> list[dict]:
             chosen = not selected_set and _is_loadable(status)
             if chosen:
                 selected_set = True
-            results.append({"name": display, "kind": "mlx", "status": status, "selected": chosen})
+            adapter_path = _get_adapter_path(cand)
+            adapter_name = Path(adapter_path).name if adapter_path else None
+            results.append({
+                "name": display,
+                "kind": "mlx",
+                "status": status,
+                "selected": chosen,
+                "adapter": bool(adapter_path),
+                "adapter_name": adapter_name,
+            })
 
     for cand in _get_model_priority("transformers"):
         display = _display_name_from_id_or_path(cand)
@@ -140,7 +171,16 @@ def check_model_availability() -> list[dict]:
         chosen = not selected_set and _is_loadable(status)
         if chosen:
             selected_set = True
-        results.append({"name": display, "kind": "transformers", "status": status, "selected": chosen})
+        adapter_path = _get_adapter_path(cand)
+        adapter_name = Path(adapter_path).name if adapter_path else None
+        results.append({
+            "name": display,
+            "kind": "transformers",
+            "status": status,
+            "selected": chosen,
+            "adapter": bool(adapter_path),
+            "adapter_name": adapter_name,
+        })
 
     return results
 
@@ -167,9 +207,10 @@ def set_load_progress_callback(cb):
 class _MLXPipelineWrapper:
     """MLX の load/generate を transformers の pipeline と互換なインターフェースで包む。"""
 
-    def __init__(self, model, tokenizer, model_id: str):
+    def __init__(self, model, tokenizer, model_id: str, adapter_path: str | None = None):
         self._model = model
         self.tokenizer = tokenizer
+        self._adapter_path = adapter_path
         self.model = type("_FakeConfig", (), {})()
         self.model.config = type("_Config", (), {"_name_or_path": model_id})()
 
@@ -205,9 +246,12 @@ def _try_load_mlx():
             continue
         if local is None:
             _ensure_huggingface_auth(cand)
+        adapter_path = _get_adapter_path(cand)
         try:
-            model, tokenizer = _mlx_load_with_progress(mlx_load, model_path)
-            return _MLXPipelineWrapper(model, tokenizer, _display_name_from_id_or_path(model_path))
+            model, tokenizer = _mlx_load_with_progress(mlx_load, model_path, adapter_path=adapter_path)
+            return _MLXPipelineWrapper(
+                model, tokenizer, _display_name_from_id_or_path(model_path), adapter_path=adapter_path
+            )
         except Exception as e:
             last_err = e
             continue
@@ -232,19 +276,22 @@ def _resolve_model_dir(model_path: str) -> Path | None:
         return None
 
 
-def _mlx_load_with_progress(mlx_load, model_path: str):
-    """mx.load をモンキーパッチし、safetensors ファイル単位の進捗を通知しながらロードする。"""
-    cb = _load_progress_callback
-    if cb is None:
-        return mlx_load(model_path)
+def _mlx_load_with_progress(mlx_load, model_path: str, adapter_path: str | None = None):
+    """mx.load をモンキーパッチし、safetensors ファイル単位の進捗を通知しながらロードする。
+    adapter_path が指定されていれば mlx_lm.load(..., adapter_path=...) でアダプタを付与する。
+    """
+    load_kwargs = {"adapter_path": adapter_path} if adapter_path else {}
+    if _load_progress_callback is None:
+        return mlx_load(model_path, **load_kwargs)
 
     import glob as _glob
     import mlx.core as mx
 
+    cb = _load_progress_callback
     model_dir = _resolve_model_dir(model_path)
     weight_files = sorted(_glob.glob(str(model_dir / "model*.safetensors"))) if model_dir else []
     if not weight_files:
-        return mlx_load(model_path)
+        return mlx_load(model_path, **load_kwargs)
 
     total_bytes = sum(os.path.getsize(f) for f in weight_files)
     loaded_bytes = 0
@@ -263,7 +310,7 @@ def _mlx_load_with_progress(mlx_load, model_path: str):
 
     mx.load = _patched_mx_load
     try:
-        result = mlx_load(model_path)
+        result = mlx_load(model_path, **load_kwargs)
     finally:
         mx.load = original_mx_load
     return result
@@ -290,6 +337,22 @@ def release_chat_pipe():
     global _pipe, _using_mlx
     _pipe = None
     _using_mlx = False
+
+
+def get_loaded_model_display_name(pipe) -> str:
+    """
+    ロード済みパイプラインの表示名を返す。アダプタ接続時は "モデル名 with アダプタ名"。
+    """
+    base = getattr(
+        getattr(pipe, "model", None) and getattr(pipe.model, "config", None),
+        "_name_or_path",
+        "",
+    ) or ""
+    adapter_path = getattr(pipe, "_adapter_path", None)
+    if adapter_path:
+        adapter_name = Path(adapter_path).name or "アダプタ"
+        return f"{base} with {adapter_name}"
+    return base
 
 
 def _messages_to_plain(messages: list[dict]) -> list[dict]:

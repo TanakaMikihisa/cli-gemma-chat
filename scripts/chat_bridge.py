@@ -266,7 +266,11 @@ def main():
     user_name = str(cfg.get("user_name") or "You")
     emit("config", {"assistant_name": assistant_name, "user_name": user_name})
 
-    from scripts.pipe_loader import check_model_availability, set_load_progress_callback
+    from scripts.pipe_loader import (
+        check_model_availability,
+        get_loaded_model_display_name,
+        set_load_progress_callback,
+    )
 
     model_statuses = check_model_availability()
     emit("models", {"models": model_statuses})
@@ -286,10 +290,7 @@ def main():
     finally:
         set_load_progress_callback(None)
 
-    _cfg_pipe = getattr(pipe, "model", None) and getattr(pipe.model, "config", None)
-    _model_id = getattr(_cfg_pipe, "_name_or_path", None) if _cfg_pipe else None
-    _model_display = (_model_id.split("/")[-1] if _model_id and "/" in _model_id else _model_id) or ""
-
+    _model_display = get_loaded_model_display_name(pipe)
     emit("model_loaded", {"model_name": _model_display})
 
     pre_loaded = load_pre_loading_data()

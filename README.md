@@ -53,6 +53,9 @@ make convert-mlx-4bit
   "user_name": "You",
   "model_priority": {
     "mlx": ["models/gemma-3-glitter-12b-8bit"],
+    "adapters": {
+      "mlx-community/Gemma-3-Glitter-12B-8bit": "~/.cache/huggingface/hub/Adapter"
+    },
     "transformers": ["Qwen/Qwen2.5-7B-Instruct"]
   }
 }
@@ -63,7 +66,16 @@ make convert-mlx-4bit
 | `assistant_name` | チャット画面に表示するアシスタント名（既定: `Gemma`） |
 | `user_name` | チャット画面に表示するユーザー名（既定: `You`） |
 | `model_priority.mlx` | Mac で試すモデルの優先リスト。ローカルパスまたは HF repo id |
+| `model_priority.adapters` | モデル ID ごとの LoRA アダプタパス（後述） |
 | `model_priority.transformers` | Mac 以外（または MLX 失敗時）に試すモデルの優先リスト |
+
+### アダプタ（LoRA）
+
+MLX でロードするモデルに、[mlx_lm](https://github.com/ml-explore/mlx-lm) 形式の LoRA アダプタを付けて使えます。
+
+- **設定**: `model_priority.adapters` に `"モデルID": "アダプタのディレクトリパス"` を書きます。モデル ID は `model_priority.mlx` に書いているものと一致させます（例: `mlx-community/Gemma-3-Glitter-12B-8bit`）。
+- **アダプタの形式**: ディレクトリ内に `adapter_config.json` と重みファイルが必要です（`mlx_lm.lora` で学習・保存した形式）。
+- **表示**: 起動時のモデル一覧で「with アダプタ名」、接続中は「Model: モデル名 with アダプタ名」と表示されます。アダプタ名は指定したパスのディレクトリ名（例: `Mine`）です。
 
 ## 主な機能
 

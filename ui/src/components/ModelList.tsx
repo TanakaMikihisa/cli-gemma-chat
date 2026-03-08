@@ -31,6 +31,9 @@ export const ModelList: React.FC<ModelListProps> = ({ models }) => {
           <Box key={i} paddingLeft={2}>
             <Text color={st.color}>{st.icon}</Text>
             <Text> {m.name} </Text>
+            {m.adapter && (
+              <Text dimColor> with {m.adapter_name || "アダプタ"} </Text>
+            )}
             <Text dimColor>({m.kind})</Text>
             <Text dimColor> [{statusLabel[m.status]}]</Text>
             {m.selected && (

@@ -10,6 +10,8 @@ export interface ModelStatus {
   kind: "mlx" | "transformers";
   status: "local" | "cached" | "not_found";
   selected: boolean;
+  adapter?: boolean;
+  adapter_name?: string | null;
 }
 
 export interface AppConfig {
