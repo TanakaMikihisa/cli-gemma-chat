@@ -91,8 +91,9 @@ def check_model_availability() -> list[dict]:
         try:
             from huggingface_hub import scan_cache_dir
             cache_info = scan_cache_dir()
+            lower = repo_id.lower()
             for repo in cache_info.repos:
-                if repo.repo_id == repo_id:
+                if repo.repo_id.lower() == lower:
                     return True
         except Exception:
             pass
